@@ -1,0 +1,17 @@
+{
+  "name": "xobi-auth-backend",
+  "version": "1.0.0",
+  "description": "Fastify OTP authentication backend",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/jwt": "^8.0.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1"
+  }
+}

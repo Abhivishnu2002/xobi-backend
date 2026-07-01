@@ -1,0 +1,10 @@
+# Local environment credentials
+.env
+
+# Dependencies
+node_modules/
+
+# Local databases / generated files
+users.json
+logs/
+.DS_Store
