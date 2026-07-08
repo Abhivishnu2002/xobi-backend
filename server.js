@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import dotenv from 'dotenv';
-import { db } from './db.js';
+import { db, connectDB } from './db.js';
 
 dotenv.config();
 
@@ -178,7 +178,7 @@ fastify.post('/api/auth/login/verify-otp', async (request, reply) => {
     }
 
     // OTP Verified! Now handle login logic
-    const user = db.findUserByMobile(session.mobile);
+    const user = await db.findUserByMobile(session.mobile);
     if (!user) {
       // Return details indicating mobile is verified but needs profile details (signup required)
       return {
@@ -196,7 +196,7 @@ fastify.post('/api/auth/login/verify-otp', async (request, reply) => {
       email: user.email,
       mobile: user.mobile,
       role: user.role
-    }, { expiresIn: '7d' });
+    }, { expiresIn: '30d' });
 
     // Clean verification session
     verificationStore.delete(verificationId);
@@ -223,10 +223,12 @@ fastify.post('/api/auth/signup/send-otp', async (request, reply) => {
   }
 
   // Check if user already exists
-  if (db.findUserByMobile(mobile)) {
+  const existingMobile = await db.findUserByMobile(mobile);
+  if (existingMobile) {
     return reply.status(400).send({ success: false, error: 'Mobile number is already registered' });
   }
-  if (db.findUserByEmail(email)) {
+  const existingEmail = await db.findUserByEmail(email);
+  if (existingEmail) {
     return reply.status(400).send({ success: false, error: 'Email address is already registered' });
   }
 
@@ -353,25 +355,26 @@ fastify.post('/api/auth/signup/verify-otp', async (request, reply) => {
       return reply.status(400).send({ success: false, error: 'Invalid OTP code' });
     }
 
-    // Check once again if user exists
-    if (db.findUserByMobile(session.mobile)) {
+    // Check once again if user exists (race-condition guard)
+    const existingUser = await db.findUserByMobile(session.mobile);
+    if (existingUser) {
       return reply.status(400).send({ success: false, error: 'User with this mobile number already exists' });
     }
 
-    // Create user in the database
-    const newUser = db.createUser({
+    // Create user in MongoDB
+    const newUser = await db.createUser({
       name: session.name,
       email: session.email,
       mobile: session.mobile,
     });
 
-    // Generate JWT token
+    // Generate JWT token (30-day expiry for better UX)
     const token = fastify.jwt.sign({
       id: newUser.id,
       email: newUser.email,
       mobile: newUser.mobile,
       role: newUser.role
-    }, { expiresIn: '7d' });
+    }, { expiresIn: '30d' });
 
     // Clean verification session
     verificationStore.delete(verificationId);
@@ -393,7 +396,7 @@ fastify.get('/api/auth/me', async (request, reply) => {
     await request.jwtVerify();
     const payload = request.user; // contains decoded token claims: id, email, mobile, role
     
-    const user = db.findUserById(payload.id);
+    const user = await db.findUserById(payload.id);
     if (!user) {
       return reply.status(404).send({ success: false, error: 'User profile not found' });
     }
@@ -415,7 +418,7 @@ fastify.post('/api/auth/update-profile', async (request, reply) => {
     if (membershipTier !== undefined) updates.membershipTier = membershipTier;
     if (coins !== undefined) updates.coins = coins;
 
-    const updatedUser = db.updateUser(payload.id, updates);
+    const updatedUser = await db.updateUser(payload.id, updates);
     if (!updatedUser) {
       return reply.status(404).send({ success: false, error: 'User not found' });
     }
@@ -426,9 +429,10 @@ fastify.post('/api/auth/update-profile', async (request, reply) => {
   }
 });
 
-// Start server
+// Start server — connect to MongoDB first, then listen
 const start = async () => {
   try {
+    await connectDB();
     const port = process.env.PORT || 3001;
     await fastify.listen({ port, host: '0.0.0.0' });
     console.log(`Auth backend listening on port ${port}`);

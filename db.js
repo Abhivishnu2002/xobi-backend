@@ -1,69 +1,60 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { MongoClient } from 'mongodb';
+import dotenv from 'dotenv';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_FILE = path.join(__dirname, 'users.json');
+dotenv.config();
 
-// Ensure DB file exists
-function initDb() {
-  if (!fs.existsSync(DB_FILE)) {
-    const defaultUsers = [
-      {
-        id: 'demo-id',
-        name: 'Demo User',
-        email: 'demo@xobikart.com',
-        mobile: '1234567890',
-        role: 'user',
-        membershipTier: 'Silver',
-        coins: 500,
-      }
-    ];
-    fs.writeFileSync(DB_FILE, JSON.stringify(defaultUsers, null, 2), 'utf8');
-  }
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  throw new Error('MONGODB_URI is not defined in environment variables');
 }
 
-initDb();
+// Use the database name from the connection string, fallback to 'xobikart'
+const client = new MongoClient(MONGODB_URI);
 
-function getUsers() {
-  try {
-    const data = fs.readFileSync(DB_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Error reading users from db:', error);
-    return [];
-  }
+let usersCollection = null;
+
+export async function connectDB() {
+  await client.connect();
+  const database = client.db(); // uses the DB name in the URI (himate)
+  usersCollection = database.collection('users');
+
+  // Remove any stale/corrupted documents that have null ids (from old experiments)
+  await usersCollection.deleteMany({ id: null });
+
+  // Create sparse indexes for fast lookups and to enforce uniqueness
+  // sparse: true means null/missing values are excluded from the index (no conflicts)
+  await usersCollection.createIndex({ mobile: 1 }, { unique: true, sparse: true });
+  await usersCollection.createIndex({ email: 1 }, { unique: true, sparse: true });
+  await usersCollection.createIndex({ id: 1 }, { unique: true, sparse: true });
+
+  console.log('✅ Connected to MongoDB and users collection ready');
 }
 
-function saveUsers(users) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(users, null, 2), 'utf8');
-    return true;
-  } catch (error) {
-    console.error('Error writing users to db:', error);
-    return false;
-  }
+
+// Helper: strip MongoDB's internal _id before returning user objects to the app
+function sanitize(user) {
+  if (!user) return null;
+  const { _id, ...rest } = user;
+  return rest;
 }
 
 export const db = {
-  findUserByMobile: (mobile) => {
-    const users = getUsers();
-    return users.find((u) => u.mobile === mobile);
+  findUserByMobile: async (mobile) => {
+    const user = await usersCollection.findOne({ mobile });
+    return sanitize(user);
   },
 
-  findUserByEmail: (email) => {
-    const users = getUsers();
-    return users.find((u) => u.email === email);
+  findUserByEmail: async (email) => {
+    const user = await usersCollection.findOne({ email });
+    return sanitize(user);
   },
 
-  findUserById: (id) => {
-    const users = getUsers();
-    return users.find((u) => u.id === id);
+  findUserById: async (id) => {
+    const user = await usersCollection.findOne({ id });
+    return sanitize(user);
   },
 
-  createUser: (userData) => {
-    const users = getUsers();
+  createUser: async (userData) => {
     const newUser = {
       id: Math.random().toString(36).substring(2, 11),
       role: 'user',
@@ -71,18 +62,16 @@ export const db = {
       coins: 100, // Starting reward coins
       ...userData,
     };
-    users.push(newUser);
-    saveUsers(users);
-    return newUser;
+    await usersCollection.insertOne(newUser);
+    return sanitize(newUser);
   },
 
-  updateUser: (id, updates) => {
-    const users = getUsers();
-    const idx = users.findIndex((u) => u.id === id);
-    if (idx === -1) return null;
-
-    users[idx] = { ...users[idx], ...updates };
-    saveUsers(users);
-    return users[idx];
-  }
+  updateUser: async (id, updates) => {
+    const result = await usersCollection.findOneAndUpdate(
+      { id },
+      { $set: updates },
+      { returnDocument: 'after' }
+    );
+    return sanitize(result);
+  },
 };
