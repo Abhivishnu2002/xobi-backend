@@ -407,16 +407,15 @@ fastify.get('/api/auth/me', async (request, reply) => {
   }
 });
 
-// Route: Sync operations (membership, coins deduction/addition) to backend DB
+// Route: Sync operations (membership) to backend DB
 fastify.post('/api/auth/update-profile', async (request, reply) => {
   try {
     await request.jwtVerify();
     const payload = request.user;
-    const { membershipTier, coins } = request.body || {};
+    const { membershipTier } = request.body || {};
 
     const updates = {};
     if (membershipTier !== undefined) updates.membershipTier = membershipTier;
-    if (coins !== undefined) updates.coins = coins;
 
     const updatedUser = await db.updateUser(payload.id, updates);
     if (!updatedUser) {

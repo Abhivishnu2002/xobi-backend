@@ -59,7 +59,6 @@ export const db = {
       id: Math.random().toString(36).substring(2, 11),
       role: 'user',
       membershipTier: 'Free',
-      coins: 100, // Starting reward coins
       ...userData,
     };
     await usersCollection.insertOne(newUser);
